@@ -5,92 +5,52 @@ from sqlmodel import Field, SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-# 1. Database File Configuration
-DATABASE_URL = "sqlite+aiosqlite:///./students.db"
+# --- DATABASE SETUP ---
+DATABASE_URL = "sqlite+aiosqlite:///./attendance.db"
 engine = create_async_engine(DATABASE_URL, echo=True)
 async_session_pool = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-# 2. Automatically create database tables when the app starts
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     yield
 
-app = FastAPI(title="Student Management API", lifespan=lifespan)
+app = FastAPI(title="Contact Form API", lifespan=lifespan)
 
-# 3. Database Session Dependency
+# --- DEPENDENCY INJECTION ---
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_pool() as session:
         yield session
 
-# 4. Student Table Blueprint
-class StudentBase(SQLModel):
-    name: str = Field(index=True)
-    age: int = Field(gt=0)
-    grade: str
-
-class Student(StudentBase, table=True):
+# --- DATA MODEL ---
+class ContactForm(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    email: str
+    message: str
 
-class StudentCreate(StudentBase):
-    pass
+# --- CRUD ENDPOINTS ---
 
-class StudentUpdate(SQLModel):
-    name: Optional[str] = None
-    age: Optional[int] = Field(None, gt=0)
-    grade: Optional[str] = None
-
-
-# 5. CRUD Endpoints
-
-# CREATE - Add a student
-@app.post("/students", response_model=Student, status_code=status.HTTP_201_CREATED)
-async def create_student(student_in: StudentCreate, db: AsyncSession = Depends(get_session)):
-    db_student = Student.model_validate(student_in)
-    db.add(db_student)
+# 1. CREATE SUBMISSION (Submit Contact Form)
+@app.post("/contact", response_model=ContactForm, status_code=status.HTTP_201_CREATED)
+async def create_contact_submission(form_in: ContactForm, db: AsyncSession = Depends(get_session)):
+    db.add(form_in)
     await db.commit()
-    await db.refresh(db_student)
-    return db_student
+    await db.refresh(form_in)
+    return form_in
 
-# READ ALL - View all students
-@app.get("/students", response_model=List[Student])
-async def read_students(offset: int = 0, limit: int = 100, db: AsyncSession = Depends(get_session)):
-    statement = select(Student).offset(offset).limit(limit)
+# 2. READ ALL SUBMISSIONS
+@app.get("/contact", response_model=List[ContactForm])
+async def read_all_submissions(db: AsyncSession = Depends(get_session)):
+    statement = select(ContactForm)
     results = await db.execute(statement)
     return results.scalars().all()
 
-# READ ONE - View single student by ID
-@app.get("/students/{student_id}", response_model=Student)
-async def read_student(student_id: int, db: AsyncSession = Depends(get_session)):
-    db_student = await db.get(Student, student_id)
-    if not db_student:
-        raise HTTPException(status_code=404, detail="Student not found")
-    return db_student
-
-# UPDATE - Edit a student's info
-@app.patch("/students/{student_id}", response_model=Student)
-async def update_student(student_id: int, student_in: StudentUpdate, db: AsyncSession = Depends(get_session)):
-    db_student = await db.get(Student, student_id)
-    if not db_student:
-        raise HTTPException(status_code=404, detail="Student not found")
-    
-    update_data = student_in.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_student, key, value)
-        
-    db.add(db_student)
-    await db.commit()
-    await db.refresh(db_student)
-    return db_student
-
-# DELETE - Remove a student
-@app.delete("/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_student(student_id: int, db: AsyncSession = Depends(get_session)):
-    db_student = await db.get(Student, student_id)
-    if not db_student:
-        raise HTTPException(status_code=404, detail="Student not found")
-    
-    await db.delete(db_student)
-    await db.commit()
-    return
+# 3. READ ONE SUBMISSION BY ID
+@app.get("/contact/{form_id}", response_model=ContactForm)
+async def read_submission(form_id: int, db: AsyncSession = Depends(get_session)):
+    db_form = await db.get(ContactForm, form_id)
+    if not db_form:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    return db_form
